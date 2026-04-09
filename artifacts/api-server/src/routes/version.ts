@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { authMiddleware } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -102,10 +103,10 @@ router.get("/version", async (_req: Request, res: Response) => {
 });
 
 // -- GET /api/source.tar.gz ---------------------------------------------------
-// Serves the project source as a gzipped tarball (no auth -- code is public).
-// Excludes node_modules, dist, .git, .local, secrets, and log files.
+// Serves the project source as a gzipped tarball.
+// Requires PROXY_API_KEY auth. Excludes node_modules, dist, .git, secrets, etc.
 
-router.get("/source.tar.gz", (_req: Request, res: Response) => {
+router.get("/source.tar.gz", authMiddleware, (_req: Request, res: Response) => {
   const root = findProjectRoot();
   res.setHeader("Content-Type", "application/gzip");
   res.setHeader("Content-Disposition", "attachment; filename=source.tar.gz");
@@ -120,6 +121,8 @@ router.get("/source.tar.gz", (_req: Request, res: Response) => {
     "--exclude=.env",
     "--exclude=*.log",
     "--exclude=*.secret",
+    "--exclude=.replit",
+    "--exclude=replit.nix",
     "-C", root, ".",
   ]);
 

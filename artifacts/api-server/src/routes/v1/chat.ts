@@ -67,7 +67,7 @@ const anthropic = new Anthropic({
 
 const gemini = new GoogleGenAI({
   apiKey: process.env["AI_INTEGRATIONS_GEMINI_API_KEY"] ?? "dummy",
-  httpOptions: { baseUrl: process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"] },
+  httpOptions: { apiVersion: "", baseUrl: process.env["AI_INTEGRATIONS_GEMINI_BASE_URL"] },
 });
 
 const openrouter = new OpenAI({

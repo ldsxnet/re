@@ -489,8 +489,10 @@ async function handleClaudeStream(
 
   const { system, messages: anthropicMessages } = convertMessagesToAnthropic(messages);
 
-  // Apply cache_control to system + all-but-last messages for Anthropic prompt caching
-  const { systemBlock, messages: cachedMessages } = applyAnthropicCacheControl(system, anthropicMessages);
+  // Prompt caching (cache_control) is incompatible with extended thinking -- skip it when thinking is on.
+  const { systemBlock, messages: cachedMessages } = thinkingEnabled
+    ? { systemBlock: undefined, messages: anthropicMessages }
+    : applyAnthropicCacheControl(system, anthropicMessages);
 
   // When tool_choice is "none", suppress tools entirely (Anthropic has no "none" option)
   const anthropicTools = (tools && tools.length > 0 && tool_choice !== "none")
@@ -673,8 +675,10 @@ async function handleClaudeNonStream(
 
   const { system, messages: anthropicMessages } = convertMessagesToAnthropic(messages);
 
-  // Apply cache_control for Anthropic prompt caching
-  const { systemBlock, messages: cachedMessages } = applyAnthropicCacheControl(system, anthropicMessages);
+  // Prompt caching (cache_control) is incompatible with extended thinking -- skip it when thinking is on.
+  const { systemBlock, messages: cachedMessages } = thinkingEnabled
+    ? { systemBlock: undefined, messages: anthropicMessages }
+    : applyAnthropicCacheControl(system, anthropicMessages);
 
   // When tool_choice is "none", suppress tools entirely (Anthropic has no "none" option)
   const anthropicTools = (tools && tools.length > 0 && tool_choice !== "none")

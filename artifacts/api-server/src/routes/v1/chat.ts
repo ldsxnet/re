@@ -369,14 +369,14 @@ function applyAnthropicCacheControl(
 // Gemini model config helpers
 // ----------------------------------------------------------------------
 
-function stripGeminiSuffix(model: string): { baseModel: string; thinkingEnabled: boolean } {
+function stripGeminiSuffix(model: string): { baseModel: string; thinkingEnabled: boolean; thinkingVisible: boolean } {
   if (model.endsWith("-thinking-visible")) {
-    return { baseModel: model.slice(0, -"-thinking-visible".length), thinkingEnabled: true };
+    return { baseModel: model.slice(0, -"-thinking-visible".length), thinkingEnabled: true, thinkingVisible: true };
   }
   if (model.endsWith("-thinking")) {
-    return { baseModel: model.slice(0, -"-thinking".length), thinkingEnabled: true };
+    return { baseModel: model.slice(0, -"-thinking".length), thinkingEnabled: true, thinkingVisible: false };
   }
-  return { baseModel: model, thinkingEnabled: false };
+  return { baseModel: model, thinkingEnabled: false, thinkingVisible: false };
 }
 
 // ----------------------------------------------------------------------
@@ -797,7 +797,7 @@ async function handleGeminiStream(
   stats: ReqStats
 ) {
   const { model, max_tokens, temperature, top_p } = body;
-  const { baseModel, thinkingEnabled } = stripGeminiSuffix(model);
+  const { baseModel, thinkingEnabled, thinkingVisible } = stripGeminiSuffix(model);
   const { systemInstruction, contents } = convertMessagesToGemini(body.messages);
 
   setSseHeaders(res);
@@ -816,7 +816,7 @@ async function handleGeminiStream(
     if (temperature !== undefined) config["temperature"] = temperature;
     if (top_p !== undefined) config["topP"] = top_p;
     if (systemInstruction) config["systemInstruction"] = systemInstruction;
-    if (thinkingEnabled) config["thinkingConfig"] = { thinkingBudget: -1 };
+    if (thinkingEnabled) config["thinkingConfig"] = { thinkingBudget: 8000, includeThoughts: true };
 
     sseWrite(res, makeChunk(id, model, { role: "assistant", content: "" }));
 
@@ -830,9 +830,15 @@ async function handleGeminiStream(
     let outputTokens = 0;
 
     for await (const chunk of stream) {
-      const text = chunk.text;
-      if (text) {
-        sseWrite(res, makeChunk(id, model, { content: text }));
+      const parts = (chunk.candidates?.[0]?.content?.parts ?? []) as Array<{ text?: string; thought?: boolean }>;
+      for (const part of parts) {
+        if (part.thought === true) {
+          if (thinkingVisible && part.text) {
+            sseWrite(res, makeChunk(id, model, { reasoning_content: part.text }));
+          }
+        } else if (part.text) {
+          sseWrite(res, makeChunk(id, model, { content: part.text }));
+        }
       }
       if (chunk.usageMetadata) {
         inputTokens = chunk.usageMetadata.promptTokenCount ?? inputTokens;
@@ -877,7 +883,7 @@ async function handleGeminiNonStream(
   stats: ReqStats
 ): Promise<Record<string, unknown>> {
   const { model, max_tokens, temperature, top_p } = body;
-  const { baseModel, thinkingEnabled } = stripGeminiSuffix(model);
+  const { baseModel, thinkingEnabled, thinkingVisible } = stripGeminiSuffix(model);
   const { systemInstruction, contents } = convertMessagesToGemini(body.messages);
 
   const config: Record<string, unknown> = {
@@ -886,7 +892,7 @@ async function handleGeminiNonStream(
   if (temperature !== undefined) config["temperature"] = temperature;
   if (top_p !== undefined) config["topP"] = top_p;
   if (systemInstruction) config["systemInstruction"] = systemInstruction;
-  if (thinkingEnabled) config["thinkingConfig"] = { thinkingBudget: -1 };
+  if (thinkingEnabled) config["thinkingConfig"] = { thinkingBudget: 8000, includeThoughts: true };
 
   const response = await gemini.models.generateContent({
     model: baseModel,
@@ -894,12 +900,30 @@ async function handleGeminiNonStream(
     config: config as Parameters<typeof gemini.models.generateContent>[0]["config"],
   });
 
-  const text = response.text ?? "";
+  const parts = (response.candidates?.[0]?.content?.parts ?? []) as Array<{ text?: string; thought?: boolean }>;
+  let thinkingText = "";
+  let bodyText = "";
+  for (const part of parts) {
+    if (part.thought === true) {
+      thinkingText += part.text ?? "";
+    } else {
+      bodyText += part.text ?? "";
+    }
+  }
+
   const inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
   const outputTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
   stats.promptTokens = inputTokens;
   stats.completionTokens = outputTokens;
   const id = `chatcmpl-${Date.now()}`;
+
+  const assistantMessage: Record<string, unknown> = {
+    role: "assistant",
+    content: bodyText || null,
+  };
+  if (thinkingText && thinkingVisible) {
+    assistantMessage["reasoning_content"] = thinkingText;
+  }
 
   return {
     id,
@@ -908,7 +932,7 @@ async function handleGeminiNonStream(
     model,
     choices: [{
       index: 0,
-      message: { role: "assistant", content: text },
+      message: assistantMessage,
       finish_reason: "stop",
     }],
     usage: {

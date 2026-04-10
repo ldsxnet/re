@@ -692,7 +692,9 @@ async function handleClaudeNonStream(
     model: baseModel,
     max_tokens: maxTokens,
     messages: cachedMessages,
-    stream: false,
+    // Always use streaming internally -- avoids the SDK's "Streaming is required for
+    // operations that may take longer than 10 minutes" error for large max_tokens values.
+    stream: true,
   };
   if (systemBlock) params["system"] = systemBlock;
   else if (system) params["system"] = system;
@@ -705,7 +707,10 @@ async function handleClaudeNonStream(
   if (anthropicTools) params["tools"] = anthropicTools;
   if (anthropicToolChoice) params["tool_choice"] = anthropicToolChoice;
 
-  const response = await anthropic.messages.create(params as Anthropic.MessageCreateParamsNonStreaming);
+  // .stream().finalMessage() accumulates all chunks and returns the same shape as .create()
+  const response = await anthropic.messages
+    .stream(params as Anthropic.MessageCreateParamsStreaming)
+    .finalMessage();
 
   // Collect blocks
   let thinkingText = "";
@@ -1169,6 +1174,10 @@ function normalizeModelId(model: string): string {
     m = m.toLowerCase()
          .replace(/\s+/g, "-")   // spaces -> dashes
          .replace(/\./g, "-");   // dots   -> dashes
+  }
+  // Claude and Gemini model names use dashes, not dots (e.g. claude-opus-4.6 -> claude-opus-4-6)
+  if (m.startsWith("claude-") || m.startsWith("gemini-")) {
+    m = m.replace(/\./g, "-");
   }
   return m;
 }

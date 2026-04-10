@@ -344,17 +344,26 @@ function applyAnthropicCacheControl(
   systemBlock: Anthropic.TextBlockParam[] | undefined;
   messages: Anthropic.MessageParam[];
 } {
+  // Anthropic enforces a hard limit of 4 cache_control blocks per request.
+  // System prompt takes 1 slot (if present), leaving 3 (or 4) for message blocks.
+  // To stay within the limit, only mark the most recent eligible messages.
+  const MAX_CACHE_BLOCKS = 4;
   const systemBlock: Anthropic.TextBlockParam[] | undefined = system
     ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
     : undefined;
 
+  const msgCacheSlots = MAX_CACHE_BLOCKS - (systemBlock ? 1 : 0);
+  // Eligible: all messages except the last (fresh user turn).
+  // Mark only the most recent msgCacheSlots of those.
+  const eligibleCount = messages.length - 1;
+  const firstToMark = Math.max(0, eligibleCount - msgCacheSlots);
+
   const tagged = messages.map((msg, i): Anthropic.MessageParam => {
-    // Keep the last message unchanged - it's the fresh user turn, not yet cacheable
-    if (i === messages.length - 1) return msg;
+    if (i === messages.length - 1) return msg; // last = fresh, never cached
+    if (i < firstToMark) return msg;           // older than cache window, skip
     const content = msg.content;
     if (!Array.isArray(content) || content.length === 0) return msg;
     const blocks = [...content] as Anthropic.ContentBlockParam[];
-    // Attach cache_control to the last block of each earlier message
     blocks[blocks.length - 1] = {
       ...blocks[blocks.length - 1],
       cache_control: { type: "ephemeral" },

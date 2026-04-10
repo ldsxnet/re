@@ -1184,8 +1184,9 @@ function normalizeModelId(model: string): string {
          .replace(/\s+/g, "-")   // spaces -> dashes
          .replace(/\./g, "-");   // dots   -> dashes
   }
-  // Claude and Gemini model names use dashes, not dots (e.g. claude-opus-4.6 -> claude-opus-4-6)
-  if (m.startsWith("claude-") || m.startsWith("gemini-")) {
+  // Claude uses dashes for version separators (e.g. claude-opus-4.6 -> claude-opus-4-6).
+  // Gemini keeps dots in version numbers (e.g. gemini-2.5-pro stays as-is).
+  if (m.startsWith("claude-")) {
     m = m.replace(/\./g, "-");
   }
   return m;
